@@ -1,0 +1,549 @@
+#!/bin/bash -e
+#
+# ###########################################
+#
+#
+# chroot Script by Ludwig Kreß 2021
+# u can try it for ur self but fork it on git
+#
+#
+# ###########################################
+#
+#
+# setting ur vars for build 
+#
+
+
+#
+#ARCH architecture
+export ARCH=arm64
+export SUBARCH=aarch64 
+export architecture=arm64
+export sd=$(date +"%m-%d-%Y_%T")
+# cross compiler
+export CROSS_COMPILE=/usr/bin/aarch64-linux-gnu-
+
+export VOUT=/root/repo/arm-stuff/
+# device config file
+export DEFCONF=aml_defconfig
+# kernel Option Config
+export DCONF=u_218_v3.4config
+
+compilers="crossbuild-essential-arm64 crossbuild-essential-armhf crossbuild-essential-armel gcc-arm-none-eabi"
+# gcc-multilib g++-multilib
+libpython2_dev="libexpat1-dev libpython2.7 libpython2.7-dev libpython2.7-minimal libpython2.7-stdlib"
+dependencies="gnupg flex bison gperf build-essential zip curl libncurses5-dev zlib1g-dev \
+parted kpartx debootstrap pixz qemu binfmt-support qemu-user-static abootimg cgpt vboot-kernel-utils vboot-utils \
+u-boot-tools bc lzma lzop automake autoconf m4 rsync schedtool git dosfstools e2fsprogs \
+device-tree-compiler libssl-dev systemd-container libgmp3-dev gawk qpdf make libfl-dev swig \
+${libpython2_dev} dbus python3-dev cgroup-tools lsof jetring eatmydata cmake  build-essential"
+# libesd0-dev
+deps="${dependencies} ${compilers}"
+
+#
+# Don't change anything from here 
+# 
+################################################################################################################
+# Check permisions script.
+if [[ $EUID -ne 0 ]]; then
+  echo -e "*** This script must be run as root ***";
+  exit 1;
+fi
+#loading other scripts 
+load_worker(){
+# load conf files
+# maybe load other scripts 
+if [ "$1" == "" ]; then
+	if  [[ -f ${VOUT}etc/conf/defaults ]]; then source ${VOUT}etc/conf/defaults;
+	else
+	 echo -e "*** \e[31;1mError:\e[0m config not found ";
+	 exit 1;
+	fi
+elif [ "$1" == "all" ]; then
+	for file in $lPath*; do
+	    #echo "$(basename "$file")"
+		if  [[ -f $lPath$(basename $file) ]]; then source $lPath$(basename $file);
+		#msgBox "i" "x" "loading config $(basename "$file")"
+		else
+		 echo -e "*** \e[31;1mError:\e[0m config $(basename "$file") not found ";
+		 exit 1;
+		fi
+	done
+elif [ "$1" == "one" ]; then
+	if [ "$2" != "" ];then
+		if  [[ -f $lPath$(basename $2) ]]; then source $lPath$(basename $2);
+		 msgBox "i" "" "loading config $(basename "$2")"
+		else
+		 echo -e "*** \e[31;1mError:\e[0m config $(basename "$2") not found ";
+		fi
+	else
+	 msgBox "e" "" "no config File given";	
+	fi
+elif [ "$1" == "other" ];then
+	if [ "$2" == "" ] || [ "$3" == ""  ]; then
+	 msgBox "e" "-" "no config File or path  given";
+	else
+	fN=$2$3
+	if  [[ -f $fN ]]; then source $fN;
+		 msgBox "i" "x" "loading config ${2}${3}"
+		else
+		 echo -e "*** \e[31;1mError:\e[0m config ${2}${3} not found ";
+	fi
+	fi		
+fi	
+}
+
+
+check_inet(){
+msgBox "i" "" "check ur internet connection ..."
+case "$(curl -s --max-time 2 -I http://google.com | sed 's/^[^ ]*  *\([0-9]\).*/\1/; 1q')" in
+  [23]) msgBox "s" "" " HTTP connectivity is up"; iNC="1";;
+  5) msgBox "w" "" " The web proxy won't let us through $tName cannot work properly without a working int connection.";;
+  *) msgBox "e" "" " no inet $tName cannot work properly without a working int connection.";;
+esac
+
+# { /check inet }
+}
+
+check_func(){
+if typeset -f $1 > /dev/null; then
+  #msgBox "ii" "" " there is a $1 function"
+ echo "1"
+else
+ echo " there is no ${1} function"
+fi
+
+}
+
+
+#download kernel and source files 
+kernel_src(){
+ if [ "$1" == "create" ]; then
+  	msgBox "a" "+" "create kernel folder"
+  	mkdir -p $VKSC
+ elif [ "$1" == "clean" ]; then
+  	msgBox "a" "+" "clean up kernel folder"
+  	rm -r $VKSC
+	mkdir -p $VKSC
+ elif [ "$1" == "download_src" ]; then
+	# kernel_src create
+	# select source {git,torrent,http} 
+	# get url
+	#
+	msgBox "a" "++" " donwload kernel Source for ${architecture} as ${ARCH}"
+ elif  [ "$1" == "copy" ]; then
+	#copy from local source
+	# use Folder or tar.gz
+	# if tar.gz copy and extraxt
+	# if folder copy recursive
+	#set kernelSrc V var to new kernel src
+	while true;do
+	msgBox "q" "++" "copy a (f)older or a (t)arGZ file?"
+	read -p " [++] answer :" tf
+		case $tf in
+			[Tt]* ) xTar="1";xFile="0";break;;
+			[Ff]* ) xTar="0"; xFile="1";break;;
+		esac
+	done
+	if [ "$xFile" == "1" ]; then
+	 msgBox "q" "++" "Path to Kernel Src"
+	 read -p " [++] answer: " xPath	
+	 msgBox "a" "++" "stand by copy kernelsrc to Workspace"
+	 cp -r $xPath $VKSC
+	else
+		if  [ "$xTar" == "1" ];then
+		 msgBox "q" "++" "Path to Kernel Src .tar.gz File"
+		 read -p " [++] answer: " xPath	
+		 xFN="$(basename ${xPath})"
+		 msgBox "a" "++" "copy File: ${xFN}"
+		  cp -f $xPath $VKSC"/" &> /dev/null
+		 
+		yTar="${VKSC}/${xFN}"
+		 (tar -xzf $yTar -C $VKSC &> /dev/null) & pid=$!
+		msgBox "a" "++" "extract File: ${xFN} " pid
+
+		fi
+	fi
+	#msgBox "a" "++" " copy local kernel source to workspace"
+
+ fi
+ # echo -e "download kernel source "
+}
+
+#create Export Vars and her values
+export_sub(){
+a1="export ${1}=${2}"
+eval $a1
+
+}
+set_var_one(){
+a1="${1}=${2}"
+eval $a1
+
+}
+setting_vars(){
+oVar=""
+ if [ "$1" == "all" ]; then
+ 	read -p " [++] Value for ARCH:${ARCH}= " tV
+	if [ "$tV" != "" ]; then
+	oVar=$ARCH
+	 export_sub ARCH $tV
+	msgBox "s" "++" " change ARCH from $oVar to ${ARCH}"
+	else 
+	 msgBox "s" "++" " no changes for ARCH ${ARCH}"
+	fi
+	msgBox "q" "++" "Value for SUBARCH: ${SUBARCH}= "
+	read -p " [++] answer: " tV
+	if [ "$tV" != "" ]; then
+	 oVar=$SUBARCH 
+	 export_sub SUBARCH $tV
+	 msgBox "s" "++" " change SUBARCH from $oVar to ${SUBARCH}"
+	else
+	 msgBox "s" "++" " no changes for SUBARCH ${SUBARCH}"
+	fi
+	msgBox "q" "++" "Value for ARCHITECTURE: ${architecture}= "
+	read -p " [++] answer: " tV
+	if [ "$tV" != "" ]; then 
+	 oVar=$architecture
+	 export_sub architecture $tV
+	 msgBox "s" "++" " change ARCHITECTURE from $oVar to ${architecture}"
+	else
+	 msgBox "s" "++" " no changes for ARCHITECTURE ${architecture}"
+	fi
+	msgBox "q" "++" "Value for CROSS COMPILER: ${CROSS_COMPILE}= "	
+	read -p " [++] answer: " tV
+	if [ "$tV" != "" ]; then 
+	 oVar=$CROSS_COMPILE
+	 export_sub CROSS_COMPILE $tV
+	 msgBox "s" "++" " change CROSS COMPILER from $oVar ${CROSS_COMPILE}"
+	else
+	 msgBox "s" "++" " no changes for CROSS COMPILER ${CROSS_COMPILE}"
+	fi
+	msgBox "q" "++" "Value for WORK DIR: ${VOUT}= "	
+	read -p " [++] answer: " tV
+	if [ "$tV" != "" ]; then 
+ 	 oVar=$VOUT
+	 export_sub VOUT $tV
+	 msgBox "s" "++" " change WORK DIR from $oVar to ${VOUT}"	 
+	else
+	 msgBox "s" "++" " no changes for WORK DIR ${VOUT}"
+	fi
+	msgBox "q" "++" "Value for ROOTFS: ${VRFS}= "
+	read -p " [++] answer: "  tV
+	if [ "$tV" != "" ]; then 
+	 oVar=$VRFS
+	 export_sub VRFS $tV
+	 msgBox "s" "++" " change ROOTFS from $oVar to  ${VRFS}"
+	else
+	 msgBox "s" "++" " no changes for ROOTFS ${VRFS}"
+	fi
+	msgBox "q" "++" "Value for Kernel Path: ${VKSC}= "
+	read -p " [++] answer:" tV
+	if [ "$tV" != "" ]; then 
+	 oVar=$VKSC
+	 export_sub VKSC $tV
+	 msgBox "s" "++" " change Kernel Path from $oVar to ${VKSC}"
+	else
+	 msgBox "s" "++" " no changes for Kernel Path ${VKSC}"
+	fi
+	msgBox "q" "++" "Value for Kernel Device DEFCONF: ${DEFCONF}= "
+	read -p " [++] answer: " tV
+	if [ "$tV" != "" ]; then 
+	 oVar=$DEFCONF	
+	 export_sub DEFCONF $tV
+	 msgBox "s" "++" " change Device DEFCONF from $oVar to ${DEFCONF}"
+	else
+	 msgBox "s" "++" " no changes for Device DEFCONF ${DEFCONF}"
+	fi
+	msgBox "q" "++" "Value for Kernel DCONF: ${DCONF}= "
+	read -p " [++] answer: " tV
+	if [ "$tV" != "" ]; then
+	 oVar=$DCONF
+	 export_sub DCONF $tV
+	 msgBox "s" "++" " change Kernel DCONF from $oVar to ${DCONF}"
+	else
+	 msgBox "s" "++" " no changes for Kernel DCONF ${DCONF}"
+	fi
+
+ elif [ "$1" == "exp_one" ]; then
+	export_sub $2 $3
+ elif [ "$1" == "set_one" ]; then
+	set_var_one $2 $3
+ elif [ "$1" == "one" ]; then
+ 	while true; do
+	 read -p "[++] var:" tVN
+	 read -p "[++] value: " tVV
+	 export_sub $tVN $tVV
+	msgBox "q" "+" "set an other var? "
+	 read -p "[+] answer: " yn
+	 case $yn in 
+		[Yy]* ) setting_vars one;break;;
+		[Nn]* ) break;;
+	 esac
+	done
+ fi
+}
+##########################################################################################
+##########################################################################################
+
+#load other source scripts
+load_worker
+load_worker all
+
+#xEnv=$(env)
+#msgBox "d" "" "$xEnv" "d"
+msgBox "" "" "#########################################################"
+msgBox "" "" "# $sName script ver: 0.2a                               #"
+msgBox "" "" "# This script will help u to build an arm version of    #"
+msgBox "" "" "# Kali-Linux for AmLogic S905X3 u212 and u218 boards    #"
+msgBox "" "" "# watching TV and do crazy stuff like WPA hack or       #"
+msgBox "" "" "# other penetration test                                #"
+msgBox "" "" "#                                                       #"
+msgBox "" "" "# copyright Ludwig Kreß 2021                            #"
+msgBox "" "" "#########################################################"
+msgBox "" "" " "
+#check for inet
+check_inet
+
+##########################################################################################
+
+
+
+#user interaction check for updates?
+
+if [ "$iNC" == "1" ];then
+	msgBox "i" "" "System update " 
+	msgBox "q" "" "u want to update ur system?"
+	while true; do
+	 read -p " [+] answer:" yn
+	 case $yn in
+		[Yy] ) msgBox "a" "+" " update now"; apt-wait update;msgBox "s" "+" " updates done"; break;;
+		[Nn] ) msgBox "w" "+" " no UPDATE" ; break;;
+		* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+	 esac
+	done
+	msgBox "i" "" "System dependencies"
+	msgBox "q" "" "u want to install dependencies ?"
+	while true;do 
+	 read -p " [+] answer: " yn
+	 case $yn in
+		[Yy] ) msgBox "a" "+" " install dependencies now ";apt-wait install_deps $deps; msgBox "s" "+" " install dependecies done";break;;
+		[Nn] ) msgBox "w" "+" " no dependecies will be installed"; break;;
+		* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+	 esac
+	done 
+else
+	msgBox "w" "" " no Updates no Dependencies without Internet connection."
+	msgBox "q" "+" "do u want to continue ? " 
+	while true; do
+	 read -p " [+] answer: " yn
+	case $yn in
+		[Yy] ) msgBox "w" "+" " Maybe the Script won't work correctly"; break;;
+		[Nn] ) msgBox "e" "+" " exit $tName now. bye"; exit 1; break;;
+		* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+	esac
+	done
+fi
+
+# *** maybe download linaro toolchain
+#     mkkdir -p $VOUT/kernel/toolchains
+#     cd $VOUT/kernel/toolchains/
+#     git clone git://gitlab.com/kalilinux/packages/gcc-arm-eabi-linaro-4-6-2.git
+#     export CROSS_COMPILE=$VOUT/kernel/toolchains/gcc-arm-eabi-linaro-4.6.2/bin/arm-eabi-
+##########################################################################################
+
+# change vars befor fire up?
+##########################################################################################
+msgBox "i" "" " Setup ENV Vars "
+msgBox "q" "+" " do u  want to change the vars ?" 
+while true;do	
+ read -p " [+] answer: " yn
+ case $yn in
+	[Yy] ) setV=1;break;;
+	[Nn] ) setV=0;break;;
+	* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+ esac
+done
+if [ "$setV" == "1" ]; then
+ while true; do
+ msgBox "q" "+" " do u want to set all Vars or single one (as)?" 
+ read -p " [+] answer: " yn
+ case $yn in 
+	[Aa] ) msgBox "d" "+" " setup all vars ..."; setting_vars all;break;;
+	[Ss] ) setting_vars one;break;;
+	* ) msgBox "e" "+" "wrong input only (Aa/Ss) allowed";
+ esac
+done 
+else
+
+msgBox "ii" "+" " fire up with default vars"
+fi
+#setting_vars;msgBox "s" "+" " setting vars done"
+
+##########################################################################################
+
+
+
+##########################################################################################
+
+msgBox "i" "" " check rootfs"
+if [ -d $VRFS ];
+ then
+	msgBox "q" "+" "${VRFS} exists, do u want to clean ?"
+	while true; do
+		read -p " [+] answer: " yn
+		case $yn in
+			[Yy] ) clean_rootfs yes; clean_rootfs create;msgBox "s" "+" " clean RootFS done"; break;;
+			[Nn] ) clean_rootfs no;msgBox "w" "+" " no clean RootFS"; break;;
+			* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+		esac
+	done
+ else
+
+	msgBox "a" "+" " create new RootFS"	
+	clean_rootfs create
+	msgBox "s" "+" " RootFS created"
+	# next stepps 
+	msgBox "q" "+" "would u setup the RootFS ?"
+	while true; do
+		read -p " [+] answer: " yn
+		case $yn in
+			[Yy] ) build_rootfs;msgBox "s" "+" "Build of RootFS done" break;;
+			[Nn] ) msgBox "w" "+" " ur not setting up the RootFS"; break;;
+			* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+		esac
+	done
+fi
+msgBox "i" "" " check kernel folder and source"
+# check for Kernel folder
+
+if [ -d $VKSC ];
+ then
+	msgBox "q" "+" "${VKSC} exist, do u want to clean?"
+	while true; do
+		read -p " [+] answer: " yn
+		case $yn in
+			[Yy] ) kernel_src clean; msgBox "s" "+"  " clean kernel done";break;;
+			[Nn] ) msgBox "w" "+"  " u will not clean the kernel";noCK="1";break;;
+			* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+		esac
+	done
+	msgBox "q" "+" "download kernel source ?"
+	while true; do	
+		read -p " [+] answer: " yn
+		case $yn in 
+			[Yy] ) kernel_src download_src; msgBox "s" "+" " download kernel source done";break;;
+			[Nn] ) msgBox "w" "+" " u will not download the kernel source"; ksrc="0"; break;;
+			* ) msgBox "e" "+" "wrong input only (Yy/Nn) allowed";
+		esac
+	done
+
+	if [ "$ksrc" == "0" ];then
+	msgBox "q" "++" "copy local kernel source to workspace ?"
+	while true; do 
+		read -p " [++] answer: " yn
+		case $yn in
+			[Yy] ) kernel_src copy;msgBox "s" "++"  " copy kernel source done";break;;
+			[Nn] ) msgBox "w" "++" " $tName will not work without a kernel source. "; break;;
+			* ) msgBox "e" "++" "wrong input only (Yy/Nn) allowed";
+		esac
+	done
+	fi
+else
+	msgBox "ii" "+" " No kernel source exists in ${VOUT} i will create the stuff now "
+	kernel_src create
+	msgBox "q" "+" "(c)opy from local or (d)ownload from inet "
+	while true; do 	
+		read -p " [+] answer: " yn
+		case $yn in
+			[Cc] ) kernel_src copy;msgBox "s" "+"  " copy kernel source done";break;;
+			[Dd]*) kernel_src download_src; msgBox "s" "+" " download kernel source done";break;;
+			* ) msgBox "e" "+" "wrong input only (Cc/Dd) allowed";
+		esac
+	done
+
+	msgBox "i" "" " Kernel Source in ${VKSC} "
+fi
+##########################################################################################
+
+
+
+##########################################################################################
+msgBox "i" "" "Setup toolchain "
+
+dTC=$(check_func downloadTC)
+if [ "${dTC}" == "1" ]; then
+	downloadTC
+else
+	#msgBox "e" "+" "${dTC}" 
+	load_worker "one" "vendetta-tc"
+	dTC=$(check_func downloadTC)
+	if [ "${dTC}" == "1" ];then 
+	 downloadTC 
+	else 
+	 msgBox "e" "+" "${dTC}" 
+	fi
+fi
+
+##########################################################################################
+
+
+
+##########################################################################################
+#prove if folder image exist and prove if img File exists
+msgBox "i" "" "Create the ImageFile"
+msgBox "a" "+" "install Imagetools"
+apt-wait install_deps "kpartx xz-utils u-boot-tools"
+msgBox "ii" "+" "build Image"
+msgBox "q" "+" "set a individual Image?"
+while true; do 
+	read -p " [++] answer: " yn
+	case $yn in
+		[Yy] ) newIFN="1";break;;
+		[Nn] ) newIFN="0"; break;;
+		* ) msgBox "e" "++" "wrong input only (Yy/Nn) allowed";
+	esac
+done
+if [ "${newIFN}" == "1" ]; then 
+	msgBox "q" "++" "Enter Image name with ext (.img)"
+	read -p " [++] Image Name: " xn
+	$VIMGFN="${xn}"
+fi
+
+if [ ! -d $VIMGP ];then
+ mkdir -p $VIMGP
+fi
+tIMG="${VIMGP}/${VIMGFN}"
+msgBox "a" "++" "create Image ${VIMGFN} this step takes a little while" 
+(dd if=/dev/zero of="${tIMG}" bs=32M count=100 &> /dev/null) 
+#& pid=$!
+xd=$(date +"%m-%d-%Y_%T")
+msgBox "s" "++" "Image ${VIMGFN} created {$xd}"
+##########################################################################################
+
+
+
+##########################################################################################
+
+msgBox "i" "" "Setup RootFS"
+build_rootfs
+msgBox "s" "+" "Done RootFS"
+
+##########################################################################################
+
+
+
+##########################################################################################
+
+msgBox "i" "" "Setup Kernel"
+msgBox "ii" "+" "enter Kernel Source"
+msgBox "a" "+" " start build process"
+msgBox "a" "++" "clean up"
+msgBox "a" "++" "Mr Proper"
+msgBox "a" "++" "Kernel MenuConfig"
+msgBox "a" "++" "build Kernel, take a coffe get out this step needs a while "
+msgBox "s" "++" "building done."
+
+# create runtime output
+eD=$(date +"%m-%d-%Y_%T")
+msgBox "s" "" "run from: ${sD} till: ${eD}"

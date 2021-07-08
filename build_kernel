@@ -1,0 +1,129 @@
+#!/bin/bash -e
+#
+# ###########################################
+#
+#
+# Kernel Build Script by Ludwig Kreß 2020
+# u can try it for ur self but fork it on git
+#
+#
+# ###########################################
+#
+#
+# setting ur vars for build 
+#
+echo '*** Setting Vars to build ur Kernel ***'
+#
+#ARCH architecture
+export ARCH=arm64
+export SUBARCH=arm64 
+# cross compiler
+export CROSS_COMPILE=/usr/bin/aarch64-linux-gnu-
+# DTC EXT 
+export DTC_EXT=dtc
+# PATH VAR
+export PATH=/usr/bin/:$PATH
+# Output Folder 
+export VOUT=out
+# device config file
+export DEFCONF=aml_defconfig
+# kernel Option Config
+export DCONF=u_218_v3.4config
+export WPWD=${pwd}
+compilers="crossbuild-essential-arm64 crossbuild-essential-armhf crossbuild-essential-armel gcc-arm-none-eabi"
+libpython2_dev="libexpat1-dev libpython2.7 libpython2.7-dev libpython2.7-minimal libpython2.7-stdlib"
+dependencies="gnupg flex bison gperf build-essential zip curl libncurses5-dev zlib1g-dev \
+parted kpartx debootstrap pixz qemu-user-static abootimg cgpt vboot-kernel-utils vboot-utils \
+u-boot-tools bc lzma lzop automake autoconf m4 rsync schedtool git dosfstools e2fsprogs \
+device-tree-compiler libssl-dev systemd-container libgmp3-dev gawk qpdf make libfl-dev swig \
+${libpython2_dev} dbus python3-dev cgroup-tools lsof jetring eatmydata cmake"
+
+deps="${dependencies} ${compilers}"
+
+#
+# Don't change anything from here 
+# 
+
+# Check permisions script.
+if [[ $EUID -ne 0 ]]; then
+  echo "*** This script must be run as root ***";
+  exit 1;
+fi
+# check systemupdates and deps
+apt-wait () {
+  while fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do
+    sleep 5
+  done
+
+  if [ "$1" == "update" ];then
+    apt-get update
+  elif [ "$1" == "install" ];then
+    apt-get -y -qq $@
+  elif [ "$1" == "install_deps" ];then
+    apt-get install -y -qq $deps
+  elif [ "$1" == "remove" ];then
+    apt-get -y --purge "$@"
+  elif [ "$1" == "dpkg" ];then
+    "$@"
+  fi
+}
+
+# Update list deb packages.
+apt-wait update
+# Install dependencies.
+apt-wait install_deps
+
+
+if [ -d $VOUT ]; 
+ then 
+	echo "*** " $VOUT " exists, clean UP" && rm -R $VOUT && mkdir $VOUT; 
+	echo '*** Clean KERNEL TREE';
+	echo '*-> make clean ARCH:'$ARCH;
+	make ARCH=$ARCH clean -j$(nproc --all);
+	echo '*-> make clean O='$VOUT' ARCH='$ARCH;
+	make O=$VOUT ARCH=$ARCH clean -j$(nproc --all);
+	echo '*-> make mrproper ARCH='$ARCH;
+	make ARCH=$ARCH mrproper -j$(nproc --all);
+	echo '*-> make mrproper O='$VOUT' ARCH='$ARCH;
+	make O=$VOUT ARCH=$ARCH mrproper -j$(nproc --all);
+#	cp $DCONF .config && cp $DCONF $VOUT/.config ;
+	echo "*** end CLEAN UP ***";
+else 
+	echo "*** Create Folder OUT for KERNEL output" && mkdir $VOUT;
+#	cp $DCONF .config && cp $DCONF $VOUT/.config;	
+	# Install kali-archive-keyring.
+	if [ ! -f /usr/share/keyrings/kali-archive-keyring.gpg ]; then
+	  temp_key="$(mktemp -d)";
+	  git clone https://gitlab.com/kalilinux/packages/kali-archive-keyring.git $temp_key;
+	  cd $temp_key && make && make install && cd $OLDPWD && rm -rf $temp_key
+	fi
+
+	echo "*-> Waiting for other software manager to finish..."
+
+	# Update list deb packages.
+	echo '*-> System Update';
+	apt-wait update;
+	# Install dependencies.
+	echo '*-> install deps';
+	apt-wait install_deps;
+
+fi
+#
+
+echo '*** load defconfig'
+#make O=$VOUT $DEVCONF menuconfig
+make ARCH=$ARCH mrproper -j$(nproc --all)
+#cp $DCONF .config && cp $DCONF $VOUT/.config
+# make error wrong path
+#make O=$VOUT ARCH=$ARCH ${PWD}/arch/$ARCH/configs/$DEFCONF menuconfig
+# fix make 
+make O=$VOUT ARCH=$ARCH $DEFCONF menuconfig
+
+#echo '*** Make MRProper'
+#make -O $VOUT mrpoper -j$(nproc --all)
+echo '*** Make 2 '$VOUT ' ***';
+make O=$VOUT -j$(nproc --all)
+echo '*** Make kernelImage ***'
+make O=$VOUT  Image dtbs modules -j$(nproc --all)
+echo '*** Ur Kernel ARCH='$ARCH' is builded in='$WPWD'/'$VOUT'/arch/'$ARCH'/boot ***'
+

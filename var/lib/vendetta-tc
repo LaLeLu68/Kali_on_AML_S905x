@@ -1,0 +1,41 @@
+#!bin/bash -e
+#
+#
+# ###########################################
+#
+# toolchain Helper v.0.1a
+# extends the Vendetta TVBuilder Script
+# Script by Ludwig Kreß 2020
+# u can try it for ur self but fork it on git
+#
+#
+# ###########################################
+
+# setting some vars to use this helper
+tcFName="" #filename to download
+tcName="" #google, linaro, other
+tcDwnType="" #download Type http, git, local whatever
+tcCache=false #create a cache folder so u need only once to download
+
+
+
+downloadTC(){
+
+# firgure out what to do
+
+msgBox "q" "+" "u want to download a toolchain?"
+while true; do
+	read -p " [+] answer: " yn
+	case $yn in
+		[Yy] ) tcDwn="1";break;;
+		[Nn] ) tcDwn="0";break;;
+		* ) msgBox "e" "+" "wrong input only Yy/Nn allowed";
+	esac
+done
+# set type of tc $ARCH
+# select the toolchain
+# linaro, google, other
+# select download type (local,http,git)
+# set 
+}
+
