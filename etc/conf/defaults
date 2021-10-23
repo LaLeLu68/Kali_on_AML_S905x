@@ -1,0 +1,105 @@
+#!/bin/bash -e
+# script by Ludwig Kreß 2020
+# config File for Vendetta TVBox builder
+######################################################################
+# String handling for msgBox()
+strInfo="\e[1;37;4;44mInfo:\e[0m"
+strActn="\e[1;33;4;95mAction:\e[0m"
+strAnsW="\e[1;33;4;95mInfo:\e[0m"
+strQuest="\e[1;33;4;95mQuestion:\e[0m"
+strWarn="\e[33;1mWarning:\e[0m"
+strSucs="\e[92;1mSuccess:\e[0m"
+strErr="\e[31;1mError\e[0m"
+
+######################################################################
+# definition of Script and global vars
+export VIMGP=$VOUT"images"
+export VRFS=$VOUT"rootfs"
+export VKSC=$VOUT"kernel"
+export WPWD=$(pwd)
+export lPath="${WPWD}/var/lib/"
+export dBoard="u218"
+export dVendor="AmLogic"
+export dCPU="S905x3"
+export dRAM=""
+# some other vars
+logFN=${VOUT}etc/log/logfile
+sName="Vendetta TV builder"
+tName="Vendetta_TV"
+tVer="v0.1a"
+iNC="0"
+knsc="1"
+xDate=$(date +"%m-%d-%Y_%T")
+export VIMGFN="${tName}-${tVer}-${ARCH}-${xDate}.img"
+######################################################################
+
+
+msgBox(){
+#$1 == type {d,s,w,e}
+#$bHead == line header [***] [+] [++]..
+#$3 == msgstr
+#$4 == PID for working rotation  1s
+#$5 == debug_logfile
+bType="${1}"
+bHead=""
+bMsg=""
+bStr=$3
+BDebug="${5}"
+
+# Line breaker Settings
+case $2 in
+	x ) bMsg="${bMsg}***";bHead="***";;
+	+ ) bMsg="${bMsg} [+]";bHead="";;
+	++ ) bMsg="${bMsg} [++]";bHead="";;
+	+++ ) bMsg="${bMsg} [+++]"; bHead="";;	
+#	* ) bMsg="";bHead="";;
+esac
+# type of msg
+case $1 in
+	[d] ) bMsg="${bMsg} ${bStr} ${bHead}";;
+	[i] ) bMsg="${bMsg} ${strInfo} $bStr ${bHead}";;
+	[a] ) bMsg="${bMsg} ${strActn} $bStr ${bHead}";;
+	ii ) bMsg="${bMsg} ${strAnsW} $bStr ${bHead}";;
+	[q] ) bMsg="${bMsg} ${strQuest} $bStr ${bHead}";;
+	[s] ) bMsg="${bMsg} ${strSucs} $bStr ${bHead}";;
+	[w] ) bMsg="${bMsg} ${strWarn} $bStr ${bHead}";;
+	[e] ) bMsg="${bMsg} ${strErr} $bStr ${bHead}";;
+	* ) bMsg="${bMsg} $bStr  ${bHead}";;
+esac
+
+#show the msg
+
+if [ "$5"  != "" ]; then 
+	if  [[ -f $logFN ]]; then 
+	 echo -e "$bMsg" >> $logFN
+
+	else
+	 mkdir -p ${VOUT}etc/log/
+	 echo -e "$bMsg" >> $logFN
+
+	fi
+fi
+
+echo -e "$bMsg"
+
+
+}
+
+# check systemupdates and deps
+apt-wait () {
+  while fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do
+    sleep 5
+  done
+
+  if [ "$1" == "update" ];then
+    apt-get -qq -y update
+  elif [ "$1" == "install" ];then
+    apt-get -y -qq $@
+  elif [ "$1" == "install_deps" ];then
+    apt-get install -y -qq -f $2
+  elif [ "$1" == "remove" ];then
+    apt-get -y --purge "$@"
+  elif [ "$1" == "dpkg" ];then
+    "$@"
+  fi
+}
